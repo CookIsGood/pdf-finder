@@ -5,9 +5,9 @@ service = DocumentService()
 
 name_doc = "Вопросы по Hive"
 #service._create_binary_pdf(name_doc)
-hello = service.pdf_to_binary(f"images/{name_doc}.pdf")
+hello = service.pdf_to_base64(f"images/{name_doc}.pdf")
 print(hello)
-service.binary_to_pdf(bytes(hello), "new_pdf")
-service.word_to_pdf('protocols')
+service.base64_to_pdf(bytes(hello), "new_pdf")
+service._word_to_pdf('protocols')
 
 
