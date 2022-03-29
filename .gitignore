@@ -124,6 +124,8 @@ venv.bak/
 images
 images/
 test.py
+protocols
+protocols/
 
 # Spyder project settings
 .spyderproject
