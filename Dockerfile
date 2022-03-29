@@ -4,9 +4,10 @@ RUN apt-get update \
             && apt-get upgrade -y \
             && apt-get autoremove \
             && apt-get autoclean \
-            && mkdir app \
-            && apt-get install poppler-utils \
-            && apt install tesseract-ocr
+            && mkdir app
+RUN apt-get install poppler-utils -y
+RUN apt install tesseract-ocr -y
+RUN apt-get install -y python3-opencv
 
 COPY requirements.txt /app/
 WORKDIR /app
@@ -18,4 +19,4 @@ COPY . /app/
 ENV SECRET_KEY="123"
 ENV FLASK_APP=app.py
 
-CMD ["python", "test.py"]
+CMD ["python", "app.py"]

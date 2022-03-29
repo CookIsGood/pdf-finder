@@ -123,6 +123,8 @@ venv.bak/
 .idea
 images
 images/
+protocols
+protocols/
 test.py
 
 # Spyder project settings

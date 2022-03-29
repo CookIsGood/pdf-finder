@@ -12,12 +12,13 @@ pip-delete-this-directory.txt
 .cache
 images
 images/
-test.py
 nosetests.xml
 coverage.xml
 *.cover
 *.log
 .git
+protocols
+protocols/
 .mypy_cache
 .pytest_cache
 .hypothesis
