@@ -18,6 +18,8 @@ coverage.xml
 *.cover
 *.log
 .git
+protocols
+protocols/
 .mypy_cache
 .pytest_cache
 .hypothesis
