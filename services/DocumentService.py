@@ -2,6 +2,7 @@ import cv2, pytesseract, os, re
 from PIL import Image
 from pdf2image import convert_from_path
 import codecs, fnmatch
+from docx2pdf import convert
 
 
 class DocumentService:
@@ -86,3 +87,10 @@ class DocumentService:
         bPDFout = codecs.decode(binary_data, 'base64')
         with open(f"images/{name_pdf}.pdf", 'wb') as f:
             f.write(bPDFout)
+
+    def _word_to_pdf(self, folder_name: str):
+        os.makedirs(f"{folder_name}", exist_ok=True)
+        files = fnmatch.filter(os.listdir(f'{folder_name}'), '*.docx')
+        for file in files:
+            convert(f'{folder_name}/{file}', f"{folder_name}/{file.strip('.docx')}.pdf")
+            os.remove(f"{folder_name}/{file}")

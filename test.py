@@ -8,5 +8,6 @@ name_doc = "Вопросы по Hive"
 hello = service.pdf_to_binary(f"images/{name_doc}.pdf")
 print(hello)
 service.binary_to_pdf(bytes(hello), "new_pdf")
+service.word_to_pdf('protocols')
 
 

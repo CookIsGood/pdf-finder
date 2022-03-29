@@ -126,6 +126,8 @@ images/
 protocols
 protocols/
 test.py
+protocols
+protocols/
 
 # Spyder project settings
 .spyderproject
