@@ -10,4 +10,10 @@ service = DocumentService()
 def search():
     content = request.get_json()
     result = service.find_block_coordinates(content['data'])
-    return jsonify({'x': result[0], 'y': result[1]})
+    return jsonify(
+        {'data':
+            {
+                'x': result[0],
+                'y': result[1]
+            }
+        })

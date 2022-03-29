@@ -10,6 +10,8 @@ RUN apt install tesseract-ocr -y
 RUN apt-get install -y python3-opencv
 RUN apt-get install tesseract-ocr-eng -y
 RUN apt-get install tesseract-ocr-rus -y
+RUN pip install python-Levenshtein
+
 
 COPY requirements.txt /app/
 WORKDIR /app
