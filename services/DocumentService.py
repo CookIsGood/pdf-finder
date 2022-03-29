@@ -84,5 +84,5 @@ class DocumentService:
     @staticmethod
     def binary_to_pdf(binary_data: bytes, name_pdf: str):
         bPDFout = codecs.decode(binary_data, 'base64')
-        with open(f"images/{name_pdf}", 'wb') as f:
+        with open(f"images/{name_pdf}.pdf", 'wb') as f:
             f.write(bPDFout)
