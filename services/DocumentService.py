@@ -3,6 +3,7 @@ from PIL import Image
 from pdf2image import convert_from_path
 import codecs, fnmatch
 from fuzzywuzzy import fuzz
+import binascii
 
 
 class DocumentService:
@@ -10,8 +11,11 @@ class DocumentService:
     def find_block_coordinates(self, base64_data: str):
         os.makedirs(f"protocols", exist_ok=True)
         os.makedirs(f"images", exist_ok=True)
-        self.base64_to_pdf(folder_name='protocols', name_pdf='my_pdf',
-                           base64_data=base64_data.encode('utf-8'))
+        try:
+            self.base64_to_pdf(folder_name='protocols', name_pdf='my_pdf',
+                            base64_data=base64_data.encode('utf-8'))
+        except binascii.Error:
+            raise
         pdf_files = fnmatch.filter(os.listdir(f'protocols'), '*.pdf')
         for file in pdf_files:
             self._make_images('images', file)
@@ -23,12 +27,22 @@ class DocumentService:
                 for elem in item:
                     res.append(elem[0])
                     cords.append(elem[1])
-            index = res.index(min(res))
+            try:
+                index = res.index(min(res))
+            except ValueError:
+                raise
             img = Image.open(f'images/{file}')
             x, y = img.size
             os.remove(f'images/{file}')
             os.remove(f'protocols/my_pdf.pdf')
-            return int(x / 2), cords[index][0][1] - 250
+            msg = {
+                'data':
+                    {
+                        'x': int(x / 2),
+                        'y': cords[index][0][1] - 250
+                    }
+            }
+            return msg
 
     def _make_images(self, folder_name: str, filename: str):
         pdfs = f"protocols/{filename}"
@@ -116,5 +130,6 @@ class DocumentService:
     @staticmethod
     def base64_to_pdf(base64_data: bytes, name_pdf: str, folder_name: str):
         bPDFout = codecs.decode(base64_data, 'base64')
+
         with open(f"{folder_name}/{name_pdf}.pdf", 'wb') as f:
             f.write(bPDFout)
