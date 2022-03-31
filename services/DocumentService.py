@@ -4,6 +4,8 @@ from pdf2image import convert_from_path
 import codecs, fnmatch
 from fuzzywuzzy import fuzz
 import binascii
+import hashlib
+import random
 
 
 class DocumentService:
@@ -11,43 +13,44 @@ class DocumentService:
     def find_block_coordinates(self, base64_data: str):
         os.makedirs(f"protocols", exist_ok=True)
         os.makedirs(f"images", exist_ok=True)
+        hash = hashlib.md5(base64_data.encode("utf-8"))
+        filename = str(f'{hash.hexdigest()}_{str(random.randint(1, 100))}')
         try:
-            self.base64_to_pdf(folder_name='protocols', name_pdf='my_pdf',
-                            base64_data=base64_data.encode('utf-8'))
+            self.base64_to_pdf(folder_name='protocols', name_pdf=filename,
+                               base64_data=base64_data.encode('utf-8'))
         except binascii.Error:
             raise
-        pdf_files = fnmatch.filter(os.listdir(f'protocols'), '*.pdf')
-        for file in pdf_files:
-            self._make_images('images', file)
-        jpg_files = fnmatch.filter(os.listdir(f'images'), '*.jpg')
-        for file in jpg_files:
-            blocks = self._find_block_cords(f'images/{file}')
-            res, cords = [], []
-            for item in blocks:
-                for elem in item:
-                    res.append(elem[0])
-                    cords.append(elem[1])
-            try:
-                index = res.index(min(res))
-            except ValueError:
-                raise
-            img = Image.open(f'images/{file}')
-            x, y = img.size
-            os.remove(f'images/{file}')
-            os.remove(f'protocols/my_pdf.pdf')
-            msg = {
-                'data':
-                    {
-                        'x': int(x / 2),
-                        'y': cords[index][0][1] - 250
-                    }
-            }
-            return msg
+        pdf_file = fnmatch.filter(os.listdir(f'protocols'), f'{filename}.pdf')[0]
+        self._make_images('images', filename)
+        jpg_file = fnmatch.filter(os.listdir(f'images'), f'{filename}.jpg')[0]
+
+        blocks = self._find_block_cords(f'images/{jpg_file}')
+        res, cords = [], []
+        for item in blocks:
+            for elem in item:
+                res.append(elem[0])
+                cords.append(elem[1])
+        try:
+            index = res.index(min(res))
+        except ValueError:
+            raise
+        img = Image.open(f'images/{jpg_file}')
+        x, y = img.size
+        os.remove(f'images/{jpg_file}')
+        os.remove(f'protocols/{filename}.pdf')
+        msg = {
+            'data':
+                {
+                    'x': int(x / 2),
+                    'y': cords[index][0][1] - 250
+                }
+        }
+        return msg
 
     def _make_images(self, folder_name: str, filename: str):
-        pdfs = f"protocols/{filename}"
+        pdfs = f"protocols/{filename}.pdf"
         pages = convert_from_path(pdfs)
-        image_name = "lastpage.jpg"
+        image_name = f"{filename}.jpg"
         pages[len(pages) - 1].save(f"{folder_name}/{image_name}", "JPEG")
 
     def _mark_region(self, image_path, iterations):
