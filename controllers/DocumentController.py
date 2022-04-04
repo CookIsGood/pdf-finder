@@ -29,7 +29,7 @@ def search():
         }
         return jsonify(msg), 400
     try:
-        msg = service.find_block_coordinates(input_data)
+        msg = service.find_stamp_coordinates(input_data)
     except binascii.Error:
         msg = {
             'data':

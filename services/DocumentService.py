@@ -1,59 +1,49 @@
 import cv2, pytesseract, os, re
 from PIL import Image
 from pdf2image import convert_from_path
-import codecs, fnmatch
+from pdf2image.exceptions import PDFPageCountError
+import codecs
 from fuzzywuzzy import fuzz
 import binascii
 import hashlib
 import random
 
 
-class DocumentService:
+class DocumentRecognizerCore:
+    def search_match(self, block_text: str, block_area: int, block_cords: list,
+                     pattern_search: str, pattern_search_fullmatch: list):
+        results = []
+        for item in pattern_search_fullmatch:
+            if re.search(item, block_text):
+                results.append([block_area, block_cords])
+        if len(results) == 0:
+            splited_text = self.split_text(block_text)
+            string_to_match = pattern_search
+            for line_splited_text in splited_text:
+                for item in line_splited_text:
+                    result = fuzz.ratio(string_to_match, item)
+                    if result >= 70:  # процент совпадения, который должен быть
+                        results.append([block_area, block_cords])
+        return results
 
-    def find_block_coordinates(self, base64_data: str):
-        os.makedirs(f"protocols", exist_ok=True)
-        os.makedirs(f"images", exist_ok=True)
-        hash = hashlib.md5(base64_data.encode("utf-8"))
-        filename = str(f'{hash.hexdigest()}_{str(random.randint(1, 100))}')
-        try:
-            self.base64_to_pdf(folder_name='protocols', name_pdf=filename,
-                               base64_data=base64_data.encode('utf-8'))
-        except binascii.Error:
-            raise
-        pdf_file = fnmatch.filter(os.listdir(f'protocols'), f'{filename}.pdf')[0]
-        self._make_images('images', filename)
-        jpg_file = fnmatch.filter(os.listdir(f'images'), f'{filename}.jpg')[0]
+    def find_block_cords(self, path_to_file: str):
+        results = []
+        for i in range(2, 7):  # количество обработок текста
+            image, line_items_coordinates, areas = self.mark_region(f"{path_to_file}", i)
+            for j, k in zip(range(len(line_items_coordinates)), range(len(areas))):
+                if 45000 < areas[k] <= 250000:  # area a block
+                    img_crop = image[line_items_coordinates[j][0][1]:line_items_coordinates[j][1][1],
+                               line_items_coordinates[j][0][0]:line_items_coordinates[j][1][0]]
+                    ret, thresh1 = cv2.threshold(img_crop, 120, 255, cv2.THRESH_BINARY)
+                    text = str(pytesseract.image_to_string(thresh1, lang='eng', config='--psm 6', ))
+                    match_in_text = self.search_match(text, areas[k], line_items_coordinates[j],
+                                                      "e-mail:", ["e-mail:", "email:", "mail", "email"])
+                    if match_in_text:
+                        results.append(match_in_text)
+        return results
 
-        blocks = self._find_block_cords(f'images/{jpg_file}')
-        res, cords = [], []
-        for item in blocks:
-            for elem in item:
-                res.append(elem[0])
-                cords.append(elem[1])
-        try:
-            index = res.index(min(res))
-        except ValueError:
-            raise
-        img = Image.open(f'images/{jpg_file}')
-        x, y = img.size
-        os.remove(f'images/{jpg_file}')
-        os.remove(f'protocols/{filename}.pdf')
-        msg = {
-            'data':
-                {
-                    'x': int(x / 2),
-                    'y': cords[index][0][1] - 250
-                }
-        }
-        return msg
-
-    def _make_images(self, folder_name: str, filename: str):
-        pdfs = f"protocols/{filename}.pdf"
-        pages = convert_from_path(pdfs)
-        image_name = f"{filename}.jpg"
-        pages[len(pages) - 1].save(f"{folder_name}/{image_name}", "JPEG")
-
-    def _mark_region(self, image_path, iterations):
+    @staticmethod
+    def mark_region(image_path, iterations):
         image = cv2.imread(image_path)
 
         # define threshold of regions to ignore
@@ -85,54 +75,80 @@ class DocumentService:
 
         return image, line_items_coordinates, areas
 
-    def _find_match_in_text(self, text: str, area: int, cords: list):
-        match = re.search("e-mail:", text)
-        match1 = re.search("email:", text)
-        match2 = re.search("mail", text)
-        results = []
-        if match or match1 or match2:
-            results.append([area, cords])
-            return results
-
-    def _split_text(self, text: str):
+    @staticmethod
+    def split_text(text: str):
         lines = text.splitlines()
         new_lines = []
         for line in lines:
             new_lines.append(line.split(" "))
         return new_lines
 
-    def _new_search_match(self, text: str, area: int, cords: list):
-        splited_text = self._split_text(text)
-        string_to_match = 'e-mail:'
-        results = []
-        for line_splited_text in splited_text:
-            for item in line_splited_text:
-                result = fuzz.ratio(string_to_match, item)
-                if result >= 70:
-                    results.append([area, cords])
-        return results
-
-    def _find_block_cords(self, path_to_file: str):
-        results = []
-        for i in range(2, 7):
-            image, line_items_coordinates, areas = self._mark_region(f"{path_to_file}", i)
-            for j, k in zip(range(len(line_items_coordinates)), range(len(areas))):
-                if 45000 < areas[k] <= 250000:  # area a block
-                    img = image[line_items_coordinates[j][0][1]:line_items_coordinates[j][1][1],
-                          line_items_coordinates[j][0][0]:line_items_coordinates[j][1][0]]
-                    ret, thresh1 = cv2.threshold(img, 120, 255, cv2.THRESH_BINARY)
-                    text = str(pytesseract.image_to_string(thresh1, lang='eng', config='--psm 6', ))
-                    if self._find_match_in_text(text, areas[k], line_items_coordinates[j]):
-                        results.append(self._find_match_in_text(text, areas[k], line_items_coordinates[j]))
-                        j += 1
-                        k += 1
-                    elif self._new_search_match(text, areas[k], line_items_coordinates[j]):
-                        results.append(self._new_search_match(text, areas[k], line_items_coordinates[j]))
-        return results
+    @staticmethod
+    def find_min_area(blocks: list):
+        res, cords = [], []
+        for item in blocks:
+            for elem in item:
+                res.append(elem[0])
+                cords.append(elem[1])
+        try:
+            index = res.index(min(res))
+            return cords, index
+        except ValueError:
+            raise
 
     @staticmethod
-    def base64_to_pdf(base64_data: bytes, name_pdf: str, folder_name: str):
-        bPDFout = codecs.decode(base64_data, 'base64')
+    def make_images(filename: str):
+        os.makedirs(f"images", exist_ok=True)
+        pdfs = f"protocols/{filename}.pdf"
+        try:
+            pages = convert_from_path(pdfs)
+        except PDFPageCountError:
+            raise ValueError
+        image_name = f"{filename}.jpg"
+        pages[len(pages) - 1].save(f"images/{image_name}", "JPEG")
 
-        with open(f"{folder_name}/{name_pdf}.pdf", 'wb') as f:
+    @staticmethod
+    def base64_to_pdf(base64_data: bytes, hash):
+        os.makedirs(f"protocols", exist_ok=True)
+        filename = str(f'{hash.hexdigest()}_{str(random.randint(1, 100))}')
+        bPDFout = codecs.decode(base64_data, 'base64')
+        with open(f"protocols/{filename}.pdf", 'wb') as f:
             f.write(bPDFout)
+        return filename
+
+
+class DocumentService(DocumentRecognizerCore):
+
+    def find_stamp_coordinates(self, base64_data: str):
+        hash = hashlib.md5(base64_data.encode("utf-8"))
+        try:
+            filename = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'), hash=hash)
+        except binascii.Error:
+            raise
+        self.make_images(filename)
+
+        blocks = self.find_block_cords(f'images/{filename}.jpg')
+        cords, index = self.find_min_area(blocks)
+        result = self.post_processing_cords(filename, cords, index)
+
+        msg = {
+            'data':
+                {
+                    'x': result[0],
+                    'y': result[1] - 250
+                }
+        }
+        return msg
+
+    @staticmethod
+    def post_processing_cords(filename: str, cords: list, index: int):
+
+        img = Image.open(f'images/{filename}.jpg')
+        x, y = img.size
+
+        os.remove(f'images/{filename}.jpg')
+        os.remove(f'protocols/{filename}.pdf')
+        x_cord = int(x/2)
+        y_cord = cords[index][0][1]
+
+        return x_cord, y_cord
