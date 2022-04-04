@@ -28,7 +28,7 @@ class DocumentRecognizerCore:
 
     def find_block_cords(self, path_to_file: str):
         results = []
-        for i in range(2, 7):  # количество обработок текста
+        for i in range(2, 7):  # количество фильтраций текста
             image, line_items_coordinates, areas = self.mark_region(f"{path_to_file}", i)
             for j, k in zip(range(len(line_items_coordinates)), range(len(areas))):
                 if 45000 < areas[k] <= 250000:  # area a block
@@ -94,16 +94,16 @@ class DocumentRecognizerCore:
             index = res.index(min(res))
             return cords, index
         except ValueError:
-            raise
+            raise ValueError("Failed to calculate coordinates")
 
     @staticmethod
-    def make_images(filename: str):
+    def make_img(filename: str):
         os.makedirs(f"images", exist_ok=True)
         pdfs = f"protocols/{filename}.pdf"
         try:
             pages = convert_from_path(pdfs)
         except PDFPageCountError:
-            raise ValueError
+            raise ValueError("Failed to calculate coordinates")
         image_name = f"{filename}.jpg"
         pages[len(pages) - 1].save(f"images/{image_name}", "JPEG")
 
@@ -111,9 +111,12 @@ class DocumentRecognizerCore:
     def base64_to_pdf(base64_data: bytes, hash):
         os.makedirs(f"protocols", exist_ok=True)
         filename = str(f'{hash.hexdigest()}_{str(random.randint(1, 100))}')
-        bPDFout = codecs.decode(base64_data, 'base64')
-        with open(f"protocols/{filename}.pdf", 'wb') as f:
-            f.write(bPDFout)
+        try:
+            bPDFout = codecs.decode(base64_data, 'base64')
+            with open(f"protocols/{filename}.pdf", 'wb') as f:
+                f.write(bPDFout)
+        except binascii.Error:
+            raise ValueError("key 'data' does not contain base64 date.")
         return filename
 
 
@@ -121,11 +124,8 @@ class DocumentService(DocumentRecognizerCore):
 
     def find_stamp_coordinates(self, base64_data: str):
         hash = hashlib.md5(base64_data.encode("utf-8"))
-        try:
-            filename = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'), hash=hash)
-        except binascii.Error:
-            raise
-        self.make_images(filename)
+        filename = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'), hash=hash)
+        self.make_img(filename)
 
         blocks = self.find_block_cords(f'images/{filename}.jpg')
         cords, index = self.find_min_area(blocks)

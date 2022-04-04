@@ -30,19 +30,11 @@ def search():
         return jsonify(msg), 400
     try:
         msg = service.find_stamp_coordinates(input_data)
-    except binascii.Error:
+    except ValueError as err:
         msg = {
             'data':
                 {
-                    'msg': "key 'data' does not contain base64 date."
-                }
-        }
-        return jsonify(msg), 422
-    except ValueError:
-        msg = {
-            'data':
-                {
-                    'msg': "Failed to calculate coordinates"
+                    'msg': err.args[0]
                 }
         }
         return jsonify(msg), 422
