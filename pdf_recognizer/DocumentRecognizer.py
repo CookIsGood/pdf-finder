@@ -5,6 +5,7 @@ import codecs
 from fuzzywuzzy import fuzz
 import binascii
 import numpy as np
+import logging
 
 
 class DocumentRecognizerCore:
@@ -14,6 +15,8 @@ class DocumentRecognizerCore:
         self._pattern = pattern
         self._min_area = min_area
         self._max_area = max_area
+        self._logger_doc_rec_core = logging.getLogger(__name__)
+        self._logger_doc_rec_core.setLevel(logging.DEBUG)
 
     def search_match(self, block_text: str, block_area: int, block_cords: list,
                      pattern_search: str):
@@ -32,7 +35,7 @@ class DocumentRecognizerCore:
 
     def find_block_cords(self, image, pattern: str):
         results = []
-        for i in range(1, 4):  # количество фильтраций текста
+        for i in range(1, 7):  # количество фильтраций текста
             image, line_items_coordinates, areas = self.mark_region(image, i)
             for j, k in zip(range(len(line_items_coordinates)), range(len(areas))):
                 if self._min_area < areas[k] <= self._max_area:  # area a block
@@ -44,6 +47,7 @@ class DocumentRecognizerCore:
                                                       pattern)
                     if match_in_text:
                         results.append(match_in_text)
+        self._logger_doc_rec_core.debug("All blocks found")
         return results
 
     @staticmethod
@@ -87,24 +91,14 @@ class DocumentRecognizerCore:
         return new_lines
 
     @staticmethod
-    def pages_to_images(pages: list) -> list:
-        result = []
-        for item in pages:
-            buffer = io.BytesIO()
-            item.save(buffer, format='JPEG')
-            result.append(cv2.imdecode(np.frombuffer(buffer.getvalue(), dtype='uint8'),
-                                       cv2.COLOR_BGR2RGB))
-        return result
-
-    @staticmethod
-    def find_min_area(blocks: list):
+    def find_min_area(blocks: list) -> tuple:
         res, cords = [], []
         for item in blocks:
             for elem in item:
                 res.append(elem[0])
                 cords.append(elem[1])
-            index = res.index(min(res))
-            return cords, index
+        index = res.index(min(res))
+        return cords, index
 
     @staticmethod
     def find_center(points: list) -> tuple:
@@ -113,10 +107,11 @@ class DocumentRecognizerCore:
         return int(result_x), int(result_y)
 
 
-
 class DocumentRecognizer(DocumentRecognizerCore):
     def __init__(self, pattern: str, min_area: int, max_area: int):
         super().__init__(pattern, min_area, max_area)
+        self._logger_doc_rec = logging.getLogger(__name__)
+        self._logger_doc_rec.setLevel(logging.DEBUG)
 
     def find_stamp_coordinates(self, base64_data: str):
         binary_pdf = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'))
@@ -136,16 +131,24 @@ class DocumentRecognizer(DocumentRecognizerCore):
                             "y": y
                         }
                     })
+            procent = self.calc_progress_recognize(i, len(images))
+            self._logger_doc_rec.info(f'Done on {procent}%/100%')
         if len(result_matches) == 0:
-            raise ValueError("Failed to calculate coordinates!")
+            logging.warning("Could not find keyword")
+            raise ValueError("Could not find keyword")
 
         msg = self.post_processing_cords(result_matches, len(images))
+        self._logger_doc_rec.debug('Message generation completed')
 
         return msg
 
     @staticmethod
-    def post_processing_cords(result_matches, count_pages):
+    def calc_progress_recognize(iter, count_iterations) -> int:
+        count_iterations_one_procent = count_iterations / 100
+        progress = iter / count_iterations_one_procent
+        return int(progress)
 
+    def post_processing_cords(self, result_matches, count_pages):
         msg = {
             "data":
                 {
@@ -153,21 +156,35 @@ class DocumentRecognizer(DocumentRecognizerCore):
                 }
         }
         msg["data"]["matches"] = result_matches
+        self._logger_doc_rec.debug('Splitting binary pdf into images is complete')
 
         return msg
 
-    @staticmethod
-    def base64_to_pdf(base64_data: bytes):
+    def base64_to_pdf(self, base64_data: bytes):
         try:
             binary_pdf = codecs.decode(base64_data, 'base64')
         except binascii.Error:
+            logging.warning("key 'b64_data' does not contain base64 date.")
             raise ValueError("key 'b64_data' does not contain base64 date.")
+        self._logger_doc_rec.debug('Base64_pdf to binary_pdf conversion completed')
         return binary_pdf
 
-    @staticmethod
-    def bpdf_to_pages(binary_pdf: bytes):
+    def bpdf_to_pages(self, binary_pdf: bytes) -> list:
+
         try:
             pages = convert_from_bytes(binary_pdf)
         except PDFPageCountError:
+            logging.warning("Splitting binary pdf into images cannot be complete")
             raise ValueError("Page count error!")
+        self._logger_doc_rec.debug('Splitting binary pdf into images is complete')
         return pages
+
+    @staticmethod
+    def pages_to_images(pages: list) -> list:
+        result = []
+        for item in pages:
+            buffer = io.BytesIO()
+            item.save(buffer, format='JPEG')
+            result.append(cv2.imdecode(np.frombuffer(buffer.getvalue(), dtype='uint8'),
+                                       cv2.COLOR_BGR2RGB))
+        return result
