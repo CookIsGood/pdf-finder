@@ -1,15 +1,16 @@
-import cv2, pytesseract, os, re
-from PIL import Image
-from pdf2image import convert_from_path
+import cv2, pytesseract, re, io
+from pdf2image import convert_from_bytes
 from pdf2image.exceptions import PDFPageCountError
 import codecs
 from fuzzywuzzy import fuzz
 import binascii
-import hashlib
-import random
+import numpy as np
 
 
 class DocumentRecognizerCore:
+    def __init__(self, pattern: str = "PlaceForStamp"):
+        self._pattern = pattern
+
     def search_match(self, block_text: str, block_area: int, block_cords: list,
                      pattern_search: str, pattern_search_fullmatch: list):
         results = []
@@ -26,10 +27,10 @@ class DocumentRecognizerCore:
                         results.append([block_area, block_cords])
         return results
 
-    def find_block_cords(self, path_to_file: str):
+    def find_block_cords(self, img):
         results = []
         for i in range(2, 7):  # количество фильтраций текста
-            image, line_items_coordinates, areas = self.mark_region(f"{path_to_file}", i)
+            image, line_items_coordinates, areas = self.mark_region(img, i)
             for j, k in zip(range(len(line_items_coordinates)), range(len(areas))):
                 if 45000 < areas[k] <= 250000:  # area a block
                     img_crop = image[line_items_coordinates[j][0][1]:line_items_coordinates[j][1][1],
@@ -43,8 +44,7 @@ class DocumentRecognizerCore:
         return results
 
     @staticmethod
-    def mark_region(image_path, iterations):
-        image = cv2.imread(image_path)
+    def mark_region(image, iterations):
 
         # define threshold of regions to ignore
         THRESHOLD_REGION_IGNORE = 40
@@ -96,40 +96,18 @@ class DocumentRecognizerCore:
         except ValueError:
             raise ValueError("Failed to calculate coordinates")
 
-    @staticmethod
-    def make_img(filename: str):
-        os.makedirs(f"images", exist_ok=True)
-        pdfs = f"protocols/{filename}.pdf"
-        try:
-            pages = convert_from_path(pdfs)
-        except PDFPageCountError:
-            raise ValueError("Failed to calculate coordinates")
-        image_name = f"{filename}.jpg"
-        pages[len(pages) - 1].save(f"images/{image_name}", "JPEG")
 
-    @staticmethod
-    def base64_to_pdf(base64_data: bytes, hash):
-        os.makedirs(f"protocols", exist_ok=True)
-        filename = str(f'{hash.hexdigest()}_{str(random.randint(1, 100))}')
-        try:
-            bPDFout = codecs.decode(base64_data, 'base64')
-            with open(f"protocols/{filename}.pdf", 'wb') as f:
-                f.write(bPDFout)
-        except binascii.Error:
-            raise ValueError("key 'data' does not contain base64 date.")
-        return filename
-
-
-class DocumentService(DocumentRecognizerCore):
+class DocumentRecognizer(DocumentRecognizerCore):
+    def __init__(self, pattern: str,):
+        super().__init__(pattern)
 
     def find_stamp_coordinates(self, base64_data: str):
-        hash = hashlib.md5(base64_data.encode("utf-8"))
-        filename = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'), hash=hash)
-        self.make_img(filename)
+        binary_pdf = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'))
+        img = self.make_img(binary_pdf)
 
-        blocks = self.find_block_cords(f'images/{filename}.jpg')
+        blocks = self.find_block_cords(img)
         cords, index = self.find_min_area(blocks)
-        result = self.post_processing_cords(filename, cords, index)
+        result = self.post_processing_cords(cords, index)
 
         msg = {
             'data':
@@ -141,14 +119,46 @@ class DocumentService(DocumentRecognizerCore):
         return msg
 
     @staticmethod
-    def post_processing_cords(filename: str, cords: list, index: int):
-
-        img = Image.open(f'images/{filename}.jpg')
-        x, y = img.size
-
-        os.remove(f'images/{filename}.jpg')
-        os.remove(f'protocols/{filename}.pdf')
-        x_cord = int(x/2)
+    def post_processing_cords(cords: list, index: int):
+        x_cord = int(1654 / 2)
         y_cord = cords[index][0][1]
 
         return x_cord, y_cord
+
+    @staticmethod
+    def base64_to_pdf(base64_data: bytes):
+        try:
+            binary_pdf = codecs.decode(base64_data, 'base64')
+        except binascii.Error:
+            raise ValueError("key 'b64_data' does not contain base64 date.")
+        return binary_pdf
+
+    @staticmethod
+    def make_img(binary_pdf: bytes):
+        try:
+            pages = convert_from_bytes(binary_pdf)
+        except PDFPageCountError:
+            raise ValueError("Failed to calculate coordinates")
+        image = pages[len(pages) - 1]
+        buffer = io.BytesIO()
+        image.save(buffer, format='JPEG')
+        return cv2.imdecode(np.frombuffer(buffer.getvalue(), dtype='uint8'),
+                            cv2.COLOR_BGR2RGB)
+
+
+class DocumentService:
+
+    @staticmethod
+    def publish_msg(data):
+        try:
+            content = data['data']
+            pattern = content["pattern"]
+            b64_data = content["b64_data"]
+        except KeyError:
+            raise ValueError("No key required!")
+        except ValueError:
+            raise ValueError("Value must be JSON!")
+        recognizer = DocumentRecognizer(pattern)
+        return recognizer.find_stamp_coordinates(b64_data)
+
+
