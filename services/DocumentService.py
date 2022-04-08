@@ -8,37 +8,40 @@ import numpy as np
 
 
 class DocumentRecognizerCore:
-    def __init__(self, pattern: str = "PlaceForStamp"):
+    def __init__(self, pattern: str = "PlaceForStamp",
+                 min_area=3000,
+                 max_area=100000):
         self._pattern = pattern
+        self._min_area = min_area
+        self._max_area = max_area
 
     def search_match(self, block_text: str, block_area: int, block_cords: list,
-                     pattern_search: str, pattern_search_fullmatch: list):
+                     pattern_search: str):
         results = []
-        for item in pattern_search_fullmatch:
-            if re.search(item, block_text):
-                results.append([block_area, block_cords])
-        if len(results) == 0:
-            splited_text = self.split_text(block_text)
-            string_to_match = pattern_search
-            for line_splited_text in splited_text:
-                for item in line_splited_text:
-                    result = fuzz.ratio(string_to_match, item)
-                    if result >= 70:  # процент совпадения, который должен быть
-                        results.append([block_area, block_cords])
+        if re.search(pattern_search, block_text):
+            results.append([block_area, block_cords])
+            return results
+        splited_text = self.split_text(block_text)
+        string_to_match = pattern_search
+        for line_splited_text in splited_text:
+            for item in line_splited_text:
+                result = fuzz.ratio(string_to_match, item)
+                if result >= 70:  # процент совпадения, который должен быть
+                    results.append([block_area, block_cords])
         return results
 
-    def find_block_cords(self, img):
+    def find_block_cords(self, image, pattern: str):
         results = []
-        for i in range(2, 7):  # количество фильтраций текста
-            image, line_items_coordinates, areas = self.mark_region(img, i)
+        for i in range(1, 4):  # количество фильтраций текста
+            image, line_items_coordinates, areas = self.mark_region(image, i)
             for j, k in zip(range(len(line_items_coordinates)), range(len(areas))):
-                if 45000 < areas[k] <= 250000:  # area a block
+                if self._min_area < areas[k] <= self._max_area:  # area a block
                     img_crop = image[line_items_coordinates[j][0][1]:line_items_coordinates[j][1][1],
                                line_items_coordinates[j][0][0]:line_items_coordinates[j][1][0]]
                     ret, thresh1 = cv2.threshold(img_crop, 120, 255, cv2.THRESH_BINARY)
                     text = str(pytesseract.image_to_string(thresh1, lang='eng', config='--psm 6', ))
                     match_in_text = self.search_match(text, areas[k], line_items_coordinates[j],
-                                                      "e-mail:", ["e-mail:", "email:", "mail", "email"])
+                                                      pattern)
                     if match_in_text:
                         results.append(match_in_text)
         return results
@@ -84,46 +87,74 @@ class DocumentRecognizerCore:
         return new_lines
 
     @staticmethod
+    def pages_to_images(pages: list) -> list:
+        result = []
+        for item in pages:
+            buffer = io.BytesIO()
+            item.save(buffer, format='JPEG')
+            result.append(cv2.imdecode(np.frombuffer(buffer.getvalue(), dtype='uint8'),
+                                       cv2.COLOR_BGR2RGB))
+        return result
+
+    @staticmethod
     def find_min_area(blocks: list):
         res, cords = [], []
         for item in blocks:
             for elem in item:
                 res.append(elem[0])
                 cords.append(elem[1])
-        try:
             index = res.index(min(res))
             return cords, index
-        except ValueError:
-            raise ValueError("Failed to calculate coordinates")
+
+    @staticmethod
+    def find_center(points: list) -> tuple:
+        result_x = (points[1][0] + points[0][0]) / 2
+        result_y = (points[1][1] + points[0][1]) / 2
+        return int(result_x), int(result_y)
+
 
 
 class DocumentRecognizer(DocumentRecognizerCore):
-    def __init__(self, pattern: str,):
-        super().__init__(pattern)
+    def __init__(self, pattern: str, min_area: int, max_area: int):
+        super().__init__(pattern, min_area, max_area)
 
     def find_stamp_coordinates(self, base64_data: str):
         binary_pdf = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'))
-        img = self.make_img(binary_pdf)
+        pages = self.bpdf_to_pages(binary_pdf)
+        images = self.pages_to_images(pages)
+        result_matches = []
+        for i in range(len(images)):
+            blocks = self.find_block_cords(images[i], pattern=self._pattern)
+            if len(blocks) != 0:
+                cords, index = self.find_min_area(blocks)
+                x, y = self.find_center(cords[index])
+                result_matches.append(
+                    {
+                        "page": i + 1,
+                        "coords": {
+                            "x": x,
+                            "y": y
+                        }
+                    })
+        if len(result_matches) == 0:
+            raise ValueError("Failed to calculate coordinates!")
 
-        blocks = self.find_block_cords(img)
-        cords, index = self.find_min_area(blocks)
-        result = self.post_processing_cords(cords, index)
+        msg = self.post_processing_cords(result_matches, len(images))
 
-        msg = {
-            'data':
-                {
-                    'x': result[0],
-                    'y': result[1] - 250
-                }
-        }
         return msg
 
     @staticmethod
-    def post_processing_cords(cords: list, index: int):
-        x_cord = int(1654 / 2)
-        y_cord = cords[index][0][1]
+    def post_processing_cords(result_matches, count_pages):
 
-        return x_cord, y_cord
+        msg = {
+            "data":
+                {
+                    "count_pages": count_pages,
+                }
+        }
+        msg["data"]["matches"] = result_matches
+
+        return msg
 
     @staticmethod
     def base64_to_pdf(base64_data: bytes):
@@ -134,16 +165,12 @@ class DocumentRecognizer(DocumentRecognizerCore):
         return binary_pdf
 
     @staticmethod
-    def make_img(binary_pdf: bytes):
+    def bpdf_to_pages(binary_pdf: bytes):
         try:
             pages = convert_from_bytes(binary_pdf)
         except PDFPageCountError:
-            raise ValueError("Failed to calculate coordinates")
-        image = pages[len(pages) - 1]
-        buffer = io.BytesIO()
-        image.save(buffer, format='JPEG')
-        return cv2.imdecode(np.frombuffer(buffer.getvalue(), dtype='uint8'),
-                            cv2.COLOR_BGR2RGB)
+            raise ValueError("Page count error!")
+        return pages
 
 
 class DocumentService:
@@ -158,7 +185,5 @@ class DocumentService:
             raise ValueError("No key required!")
         except ValueError:
             raise ValueError("Value must be JSON!")
-        recognizer = DocumentRecognizer(pattern)
+        recognizer = DocumentRecognizer(str(pattern), min_area=5000, max_area=35000)
         return recognizer.find_stamp_coordinates(b64_data)
-
-
