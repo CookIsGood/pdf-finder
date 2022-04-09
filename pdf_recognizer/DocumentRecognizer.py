@@ -162,11 +162,8 @@ class DocumentRecognizer(DocumentRecognizerCore):
 
     def post_processing_cords(self, result_matches, count, pages: list):
         buffer = io.BytesIO()
-        os.makedirs("/app/out_pdf", exist_ok=True)
-        pages[0].save("/app/out_pdf/mypdf.pdf", "PDF", resolution=100.0, save_all=True, append_images=pages[1:])
-        with open("/app/out_pdf/mypdf.pdf", "rb") as pdf_file:
-            encoded_string = base64.b64encode(pdf_file.read())
-        #b64_doc = base64.b64encode(codecs.decode((buffer.getvalue())., 'UTF-8'))
+        pages[0].save(buffer, "PDF", resolution=100.0, save_all=True, append_images=pages[1:])
+        encoded_string = base64.b64encode(buffer.getvalue())
         msg = {
             "data":
                 {
