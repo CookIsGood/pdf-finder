@@ -12,5 +12,5 @@ class DocumentService:
             raise ValueError("No key required!")
         except ValueError:
             raise ValueError("Value must be JSON!")
-        recognizer = rec.DocumentRecognizer(str(pattern), min_area=5000, max_area=35000)
+        recognizer = rec.DocumentRecognizer(**content)
         return recognizer.find_stamp_coordinates(b64_data)

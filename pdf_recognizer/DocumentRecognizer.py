@@ -9,9 +9,7 @@ import logging
 
 
 class DocumentRecognizerCore:
-    def __init__(self, pattern: str = "PlaceForStamp",
-                 min_area=3000,
-                 max_area=100000):
+    def __init__(self, min_area: int, max_area: int, pattern: str):
         self._pattern = pattern
         self._min_area = min_area
         self._max_area = max_area
@@ -108,8 +106,12 @@ class DocumentRecognizerCore:
 
 
 class DocumentRecognizer(DocumentRecognizerCore):
-    def __init__(self, pattern: str, min_area: int, max_area: int):
-        super().__init__(pattern, min_area, max_area)
+    def __init__(self, **kwargs):
+        self._min_area = kwargs.get('min_area', 5000)
+        self._max_area = kwargs.get('max_area', 35000)
+        self._pattern = kwargs.get('pattern', "PlaceForStamp")
+        super().__init__(self._pattern, self._min_area, self._max_area)
+
         self._logger_doc_rec = logging.getLogger(__name__)
         self._logger_doc_rec.setLevel(logging.DEBUG)
 
