@@ -9,7 +9,7 @@ import logging
 
 
 class DocumentRecognizerCore:
-    def __init__(self, min_area: int, max_area: int, pattern: str):
+    def __init__(self, min_area, max_area, pattern: str):
         self._pattern = pattern
         self._min_area = min_area
         self._max_area = max_area
@@ -36,15 +36,19 @@ class DocumentRecognizerCore:
         for i in range(1, 7):  # количество фильтраций текста
             image, line_items_coordinates, areas = self.mark_region(image, i)
             for j, k in zip(range(len(line_items_coordinates)), range(len(areas))):
-                if self._min_area < areas[k] <= self._max_area:  # area a block
-                    img_crop = image[line_items_coordinates[j][0][1]:line_items_coordinates[j][1][1],
-                               line_items_coordinates[j][0][0]:line_items_coordinates[j][1][0]]
-                    ret, thresh1 = cv2.threshold(img_crop, 120, 255, cv2.THRESH_BINARY)
-                    text = str(pytesseract.image_to_string(thresh1, lang='eng', config='--psm 6', ))
-                    match_in_text = self.search_match(text, areas[k], line_items_coordinates[j],
-                                                      pattern)
-                    if match_in_text:
-                        results.append(match_in_text)
+                try:
+                    if self._min_area < areas[k] <= self._max_area:  # area a block
+                        img_crop = image[line_items_coordinates[j][0][1]:line_items_coordinates[j][1][1],
+                                   line_items_coordinates[j][0][0]:line_items_coordinates[j][1][0]]
+                        ret, thresh1 = cv2.threshold(img_crop, 120, 255, cv2.THRESH_BINARY)
+                        text = str(pytesseract.image_to_string(thresh1, lang='eng', config='--psm 6', ))
+                        match_in_text = self.search_match(text, areas[k], line_items_coordinates[j],
+                                                          pattern)
+                        if match_in_text:
+                            results.append(match_in_text)
+                except TypeError:
+                    self._logger_doc_rec_core.warning("Incorrect values ​​passed")
+                    raise ValueError("Incorrect values ​​passed")
         self._logger_doc_rec_core.debug("All blocks found")
         return results
 
@@ -107,17 +111,18 @@ class DocumentRecognizerCore:
 
 class DocumentRecognizer(DocumentRecognizerCore):
     def __init__(self, **kwargs):
-        self._min_area = kwargs.get('min_area', 5000)
-        self._max_area = kwargs.get('max_area', 35000)
-        self._pattern = kwargs.get('pattern', "PlaceForStamp")
-        super().__init__(self._pattern, self._min_area, self._max_area)
-
         self._logger_doc_rec = logging.getLogger(__name__)
         self._logger_doc_rec.setLevel(logging.DEBUG)
+        self._min_area = kwargs.get('min_area', 5000)
+        self._max_area = kwargs.get('max_area', 35000)
+        self._start_page = kwargs.get('start_page', None)
+        self._stop_page = kwargs.get('stop_page', None)
+        self._pattern = str(kwargs.get('pattern', "PlaceForStamp"))
+        super().__init__(self._min_area, self._max_area, self._pattern,)
 
     def find_stamp_coordinates(self, base64_data: str):
         binary_pdf = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'))
-        pages = self.bpdf_to_pages(binary_pdf)
+        pages, num_pages, count_pages = self.bpdf_to_pages(binary_pdf, self._start_page, self._stop_page)
         images = self.pages_to_images(pages)
         result_matches = []
         for i in range(len(images)):
@@ -127,7 +132,7 @@ class DocumentRecognizer(DocumentRecognizerCore):
                 x, y = self.find_center(cords[index])
                 result_matches.append(
                     {
-                        "page": i + 1,
+                        "page": num_pages[i],
                         "coords": {
                             "x": x,
                             "y": y
@@ -136,10 +141,10 @@ class DocumentRecognizer(DocumentRecognizerCore):
             procent = self.calc_progress_recognize(i, len(images))
             self._logger_doc_rec.info(f'Done on {procent}%/100%')
         if len(result_matches) == 0:
-            logging.warning("Could not find keyword")
+            self._logger_doc_rec.warning("Could not find keyword")
             raise ValueError("Could not find keyword")
 
-        msg = self.post_processing_cords(result_matches, len(images))
+        msg = self.post_processing_cords(result_matches, count_pages)
         self._logger_doc_rec.debug('Message generation completed')
 
         return msg
@@ -150,11 +155,11 @@ class DocumentRecognizer(DocumentRecognizerCore):
         progress = iter / count_iterations_one_procent
         return int(progress)
 
-    def post_processing_cords(self, result_matches, count_pages):
+    def post_processing_cords(self, result_matches, count):
         msg = {
             "data":
                 {
-                    "count_pages": count_pages,
+                    "count_pages": count
                 }
         }
         msg["data"]["matches"] = result_matches
@@ -171,15 +176,24 @@ class DocumentRecognizer(DocumentRecognizerCore):
         self._logger_doc_rec.debug('Base64_pdf to binary_pdf conversion completed')
         return binary_pdf
 
-    def bpdf_to_pages(self, binary_pdf: bytes) -> list:
+    def bpdf_to_pages(self, binary_pdf: bytes, start_page, stop_page) -> tuple:
 
         try:
             pages = convert_from_bytes(binary_pdf)
         except PDFPageCountError:
             logging.warning("Splitting binary pdf into images cannot be complete")
             raise ValueError("Page count error!")
+        count_pages = len(pages)
+        num_pages = [i+1 for i in range(len(pages))]
+        try:
+            pages = pages[start_page:stop_page:None]
+            num_pages = num_pages[start_page:stop_page:None]
+        except TypeError:
+            self._logger_doc_rec.warning("Incorrect values ​​passed")
+            raise ValueError("Incorrect values ​​passed")
+
         self._logger_doc_rec.debug('Splitting binary pdf into images is complete')
-        return pages
+        return pages, num_pages, count_pages
 
     @staticmethod
     def pages_to_images(pages: list) -> list:
