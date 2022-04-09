@@ -1,4 +1,4 @@
-import cv2, pytesseract, re, io
+import cv2, pytesseract, re, io, os
 from pdf2image import convert_from_bytes
 from pdf2image.exceptions import PDFPageCountError
 import codecs
@@ -6,6 +6,8 @@ from fuzzywuzzy import fuzz
 import binascii
 import numpy as np
 import logging
+from PIL import Image
+import base64
 
 
 class DocumentRecognizerCore:
@@ -118,21 +120,24 @@ class DocumentRecognizer(DocumentRecognizerCore):
         self._start_page = kwargs.get('start_page', None)
         self._stop_page = kwargs.get('stop_page', None)
         self._pattern = str(kwargs.get('pattern', "PlaceForStamp"))
+
         super().__init__(self._min_area, self._max_area, self._pattern,)
 
     def find_stamp_coordinates(self, base64_data: str):
         binary_pdf = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'))
         pages, num_pages, count_pages = self.bpdf_to_pages(binary_pdf, self._start_page, self._stop_page)
         images = self.pages_to_images(pages)
+        crop_img = Image.new(mode="RGBA", size=(300, 150), color='white')
         result_matches = []
         for i in range(len(images)):
             blocks = self.find_block_cords(images[i], pattern=self._pattern)
             if len(blocks) != 0:
                 cords, index = self.find_min_area(blocks)
                 x, y = self.find_center(cords[index])
+                pages[num_pages[i]].paste(crop_img, (x-200, y-100),  crop_img)
                 result_matches.append(
                     {
-                        "page": num_pages[i],
+                        "page": num_pages[i]+1,
                         "coords": {
                             "x": x,
                             "y": y
@@ -144,7 +149,7 @@ class DocumentRecognizer(DocumentRecognizerCore):
             self._logger_doc_rec.warning("Could not find keyword")
             raise ValueError("Could not find keyword")
 
-        msg = self.post_processing_cords(result_matches, count_pages)
+        msg = self.post_processing_cords(result_matches, count_pages, pages)
         self._logger_doc_rec.debug('Message generation completed')
 
         return msg
@@ -155,7 +160,13 @@ class DocumentRecognizer(DocumentRecognizerCore):
         progress = iter / count_iterations_one_procent
         return int(progress)
 
-    def post_processing_cords(self, result_matches, count):
+    def post_processing_cords(self, result_matches, count, pages: list):
+        buffer = io.BytesIO()
+        os.makedirs("/app/out_pdf", exist_ok=True)
+        pages[0].save("/app/out_pdf/mypdf.pdf", "PDF", resolution=100.0, save_all=True, append_images=pages[1:])
+        with open("/app/out_pdf/mypdf.pdf", "rb") as pdf_file:
+            encoded_string = base64.b64encode(pdf_file.read())
+        #b64_doc = base64.b64encode(codecs.decode((buffer.getvalue())., 'UTF-8'))
         msg = {
             "data":
                 {
@@ -163,6 +174,7 @@ class DocumentRecognizer(DocumentRecognizerCore):
                 }
         }
         msg["data"]["matches"] = result_matches
+        msg["data"]["output_doc"] = str(encoded_string.decode('utf-8'))
         self._logger_doc_rec.debug('Splitting binary pdf into images is complete')
 
         return msg
@@ -184,7 +196,7 @@ class DocumentRecognizer(DocumentRecognizerCore):
             logging.warning("Splitting binary pdf into images cannot be complete")
             raise ValueError("Page count error!")
         count_pages = len(pages)
-        num_pages = [i+1 for i in range(len(pages))]
+        num_pages = [i for i in range(len(pages))]
         try:
             pages = pages[start_page:stop_page:None]
             num_pages = num_pages[start_page:stop_page:None]
