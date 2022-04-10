@@ -30,10 +30,13 @@ class DocumentRecognizerCore:
         return results
 
     def find_block_cords(self, image, pattern: str):
-        if self._min_area <= 0 or self._max_area <= 0:
-            raise ValueError("Area cannot be negative!")
-        if self._min_area >= self._max_area:
-            self._max_area = self._min_area
+        try:
+            if self._min_area <= 0 or self._max_area <= 0:
+                raise ValueError("Area cannot be negative!")
+            if self._min_area >= self._max_area:
+                self._max_area = self._min_area
+        except TypeError:
+            raise ValueError("Area value must be integer")
         results = []
         for i in range(1, 7):  # количество фильтраций текста
             image, line_items_coordinates, areas = self._mark_region(image, i)
