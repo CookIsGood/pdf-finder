@@ -1,4 +1,4 @@
-import pdf_recognizer.DocumentRecognizer as rec
+import buisness_logic.DocumentRecognizer as rec
 
 class DocumentService:
 
@@ -13,4 +13,5 @@ class DocumentService:
         except ValueError:
             raise ValueError("Value must be JSON!")
         recognizer = rec.DocumentRecognizer(**content)
-        return recognizer.find_stamp_coordinates(b64_data)
+        msg = recognizer.run()
+        return msg
