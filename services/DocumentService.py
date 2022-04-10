@@ -12,6 +12,8 @@ class DocumentService:
             raise ValueError("No key required!")
         except ValueError:
             raise ValueError("Value must be JSON!")
+        except TypeError:
+            raise ValueError("Incorrect data sent")
         recognizer = rec.DocumentRecognizer(**content)
         msg = recognizer.run()
         return msg

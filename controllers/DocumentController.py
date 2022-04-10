@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify
 from services.DocumentService import DocumentService
-import binascii
 
 documents = Blueprint('documents', __name__)
 
