@@ -1,4 +1,4 @@
-FROM tiangolo/uwsgi-nginx-flask:python3.8
+FROM python:3.9
 
 RUN apt-get update \
             && apt-get upgrade -y \
@@ -22,3 +22,5 @@ COPY . /app/
 
 ENV SECRET_KEY="123"
 ENV FLASK_APP=app.py
+
+CMD ["gunicorn", "--conf", "gunicorn_conf.py", "--bind", "0.0.0.0:80", "main:app"]
