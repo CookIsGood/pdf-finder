@@ -6,4 +6,5 @@ worker_tmp_dir = "/dev/shm"
 graceful_timeout = 240
 timeout = 240
 keepalive = 120
-threads = 10
+threads = 2
+workers = 1
