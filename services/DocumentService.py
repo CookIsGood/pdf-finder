@@ -5,11 +5,17 @@ import codecs
 from fuzzywuzzy import fuzz
 import binascii
 import numpy as np
+import logging
 
 
 class DocumentRecognizerCore:
     def __init__(self, pattern: str = "e-mail:"):
         self._pattern = pattern
+        self.gunicorn_error_logger = logging.getLogger('gunicorn.error')
+        self._logger_doc_rec_core = logging.getLogger(__name__)
+        for item in self.gunicorn_error_logger.handlers:
+            self._logger_doc_rec_core.addHandler(item)
+        self._logger_doc_rec_core.setLevel(logging.DEBUG)
 
     def search_match(self, block_text: str, block_area: int, block_cords: list,
                      pattern_search: str, pattern_search_fullmatch: list):
@@ -41,6 +47,7 @@ class DocumentRecognizerCore:
                                                       "e-mail:", ["e-mail:", "email:", "mail", "email"])
                     if match_in_text:
                         results.append(match_in_text)
+        self._logger_doc_rec_core.info("All blocks found")
         return results
 
     @staticmethod
@@ -100,9 +107,18 @@ class DocumentRecognizerCore:
 class DocumentRecognizer(DocumentRecognizerCore):
     def __init__(self):
         super().__init__()
+        self.gunicorn_error_logger = logging.getLogger('gunicorn.error')
+        self._logger_doc_rec = logging.getLogger(__name__)
+        for item in self.gunicorn_error_logger.handlers:
+            self._logger_doc_rec.addHandler(item)
+        self._logger_doc_rec.setLevel(logging.DEBUG)
 
     def find_stamp_coordinates(self, base64_data: str):
-        binary_pdf = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'))
+        try:
+            binary_pdf = self.base64_to_pdf(base64_data=base64_data.encode('utf-8'))
+        except AttributeError:
+            self._logger_doc_rec.warning(f"key 'data' does not contain base64 date.")
+            raise ValueError("key 'data' does not contain base64 date.")
         img = self.make_img(binary_pdf)
 
         blocks = self.find_block_cords(img)
@@ -116,46 +132,60 @@ class DocumentRecognizer(DocumentRecognizerCore):
                     'y': result[1] - 250
                 }
         }
+        self._logger_doc_rec.info(f'Data sent!')
         return msg
 
-    @staticmethod
-    def post_processing_cords(cords: list, index: int):
+    def post_processing_cords(self, cords: list, index: int):
         x_cord = int(1654 / 2)
         y_cord = cords[index][0][1]
 
+        self._logger_doc_rec.info(f'Data is ready to be sent!')
         return x_cord, y_cord
 
-    @staticmethod
-    def base64_to_pdf(base64_data: bytes):
+    def base64_to_pdf(self, base64_data: bytes):
         try:
             binary_pdf = codecs.decode(base64_data, 'base64')
         except binascii.Error:
-            raise ValueError("key 'b64_data' does not contain base64 date.")
+            self._logger_doc_rec.warning(f"key 'data' does not contain base64 date.")
+            raise ValueError("key 'data' does not contain base64 date.")
+
+        self._logger_doc_rec.info(f'File decoded successfully!')
         return binary_pdf
 
-    @staticmethod
-    def make_img(binary_pdf: bytes):
+    def make_img(self, binary_pdf: bytes):
         try:
             pages = convert_from_bytes(binary_pdf)
         except PDFPageCountError:
+            self._logger_doc_rec.warning(f'The PDF file could not be read. This error usually occurs if b64_data is corrupted.')
             raise ValueError("Failed to calculate coordinates")
         image = pages[len(pages) - 1]
         buffer = io.BytesIO()
         image.save(buffer, format='JPEG')
+        self._logger_doc_rec.info(f'The last page of the file has been successfully converted to an image!')
         return cv2.imdecode(np.frombuffer(buffer.getvalue(), dtype='uint8'),
                             cv2.COLOR_BGR2RGB)
 
 
 class DocumentService:
+    def __init__(self):
+        self.gunicorn_error_logger = logging.getLogger('gunicorn.error')
+        self._logger_doc_service = logging.getLogger(__name__)
+        for item in self.gunicorn_error_logger.handlers:
+            self._logger_doc_service.addHandler(item)
+        self._logger_doc_service.setLevel(logging.DEBUG)
 
-    @staticmethod
-    def publish_msg(data):
+    def publish_msg(self, data):
         try:
             content = data['data']
         except KeyError:
+            self._logger_doc_service.warning(f'No key required!')
             raise ValueError("No key required!")
         except ValueError:
-            raise ValueError("Value must be JSON!")
+            self._logger_doc_service.warning(f'Incorrect value!')
+            raise ValueError("Incorrect value!")
+        except TypeError:
+            self._logger_doc_service.warning(f'The object being sent is not JSON')
+            raise ValueError("The object being sent is not JSON")
         recognizer = DocumentRecognizer()
         return recognizer.find_stamp_coordinates(content)
 
